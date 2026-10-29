@@ -27,6 +27,12 @@ jobs:
           else
             echo "is_allowed=false" >> $GITHUB_OUTPUT
           fi
+      - name: CLA Assistant (simulated)
+        continue-on-error: true
+        id: cla_assistant
+        if: (github.event.comment.body == 'recheck') || github.event_name == 'pull_request_target'
+        run: |
+          echo "would run contributor-assistant action here"
       - name: Label PR as CLA Allowlist
         if: ${{ steps.check_allowlist.outputs.is_allowed == 'true' }}
         run: |-
