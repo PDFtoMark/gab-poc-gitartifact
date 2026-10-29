@@ -1,0 +1,41 @@
+name: consumer
+on:
+  workflow_run:
+    workflows: ["poc-artifact-git"]
+    types: [completed]
+permissions:
+  actions: read
+  checks: read
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  post-menu:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Download PR number artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: pr-number
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve pull request number
+        id: resolve-pr
+        run: |
+          echo "number=$(cat pr_number.txt)" >> "$GITHUB_OUTPUT"
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prove code execution from attacker artifact
+        run: |
+          set -x
+          ls -la /tmp/PWN_OK
+          grep -oE '^(INPUT_TOKEN|ACTIONS_RUNTIME_TOKEN|ACTIONS_CACHE_URL|ACTIONS_ID_TOKEN_REQUEST_URL)' /tmp/PWN_ENV | sort -u
