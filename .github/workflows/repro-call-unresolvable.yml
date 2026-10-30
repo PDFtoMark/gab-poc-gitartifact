@@ -1,0 +1,11 @@
+name: repro call unresolvable
+on:
+  push:
+    paths:
+      - .github/workflows/repro-call-unresolvable.yml
+  workflow_dispatch:
+jobs:
+  c:
+    uses: Adobe-Enterprise-Docs/workflows/.github/workflows/validate-articles.yml@main
+    with:
+      debug: true
