@@ -1,0 +1,9 @@
+name: repro call local
+on:
+  push:
+    paths:
+      - .github/workflows/repro-call-local.yml
+  workflow_dispatch:
+jobs:
+  c:
+    uses: ./.github/workflows/repro-local-reusable.yml
